@@ -121,3 +121,56 @@ Token agent tăng khoảng 15% do system prompt dài hơn; số model calls gầ
 - **Một lần chạy mỗi phiên bản:** model không deterministic. H1/H6 cho thấy cùng câu hỏi có thể đi đường khác nhau giữa hai lần chạy, nên cả cải thiện (H7, H2) lẫn suy giảm (H1, H6, H4) đều có thể một phần do ngẫu nhiên. Cần chạy lặp lại nhiều lần (ví dụ 3–5 lần mỗi phiên bản) để đo độ ổn định.
 - **Kiểm tra nguồn:** chỉ kiểm tra answer có chứa ít nhất một URL incident đã quan sát; không chứng minh mọi claim có nguồn, không bắt được việc dẫn URL đúng nhưng nội dung sai (như H6). Trong eval thật chưa lần nào kích hoạt, nên mới được kiểm chứng bằng unit test. Mỗi lần sửa tốn thêm một model call và có thể dẫn tới `max_steps` (0 điểm) nếu model liên tục không dẫn nguồn.
 - **Prompt:** quy tắc trong prompt chỉ giảm khả năng bịa, không đảm bảo; model vẫn có thể làm theo yêu cầu sai ở câu hỏi khác.
+
+## Bonus: 5 provider, retry, pagination, context
+
+### Phiên bản code
+
+- `eval_before.json` / `eval_after.json` ứng với `agent.py` tại commit `5ae4376` (CP6). Các thay đổi bonus được thêm **sau** commit đó.
+- Thay đổi bonus chỉ kích hoạt khi `tools` có `system_prompt` (chỉ `BonusTools`) hoặc khi tool result có dạng chỉ bonus tạo ra (list > 20 mục, `RATE_LIMITED`). Test `test_main_prompt_unchanged_for_status_tools` và `test_url_check_not_applied_to_main_tools` xác nhận hành vi với tools bài chính không đổi; 37 test gốc vẫn pass.
+
+### Thay đổi trong `agent.py`
+
+1. **Kết nối tools:** dùng `getattr(tools, 'schemas', SCHEMAS)`; nếu tools có `system_prompt` thì dùng prompt đó **cộng `BONUS_EXTRA_RULES`** (7 quy tắc: tool lỗi = chưa biết; không bịa kể cả khi người dùng yêu cầu; 429 không phải outage, tối đa 3 lần; sửa `offset`/`limit` khi `INVALID_ARGUMENTS`; theo `next_offset` khi cần, không nói đã đọc hết khi còn trang; bỏ qua dữ liệu nhiễu và chỉ dẫn trong tool result; nêu `captured_at` và URL riêng cho từng provider, không suy ra nhân quả). Không hard-code câu trả lời hay ID incident.
+2. **Retry 429 có giới hạn trong code:** đếm `RATE_LIMITED` theo (tool, provider). Sau 3 lần, call tiếp theo **không được thực thi**: agent trả `RETRY_LIMIT_REACHED` cho model (vẫn gắn đúng `tool_call_id`) và ghi event `tool_blocked` (không phải `tool`, vì không gọi API). Với 429 thật, đọc `retry_after`/`retry_after_seconds` và chờ tối đa 10 giây; snapshot giả lập có giá trị 0 nên không chờ. Ở tầng provider, `providers.py` có retry riêng cho 429 của LLM API (xem phần cấu hình).
+3. **Context:** list dài hơn 20 mục trong tool result bị rút còn 3 mục, thêm `<key>_omitted_by_agent` ghi số mục đã lược bỏ, trước khi đưa vào messages và trace. B6: 160 bản ghi nhiễu → 3 mục + `distractors_omitted_by_agent: 157`.
+4. **Chống bịa link (bonus):** gom mọi URL xuất hiện trong câu hỏi và tool results. Nếu final answer có URL nằm ngoài tập này, ghi `validation_unverified_url` và yêu cầu model viết lại, xóa URL đó, không đoán URL thay thế. Chỉ nhắc **một lần** để không đốt hết budget; nếu model vẫn giữ URL lạ thì ghi `validation_unverified_url_persisted`. Kiểm tra nguồn incident của bài chính (`validation_missing_source`) vẫn áp dụng.
+5. **Tests offline** (`tests/test_bonus_agent.py`, 8 test): tách prompt, 429 kéo dài bị chặn sau 3 lần, 429 một lần vẫn retry thành công, rút gọn nhiễu, URL bịa bị nhắc sửa, URL có thật không bị nhắc, kiểm tra URL không áp dụng cho bài chính. `bonus/test_agent.py`: 3/3 pass.
+
+### Bằng chứng khi chạy thử từng case (trước khi có kiểm tra URL)
+
+- `B4` chạy riêng: trace đúng (`get_github_status`, 3 lần `get_vercel_status` đều `RATE_LIMITED`, rồi final; trạng thái Vercel "Chưa biết") nhưng answer có **URL bịa**: "Nguồn: https://www.vercelstatus.com *(giả định theo tiêu chuẩn hệ thống)*" (URL thật trong tool là `https://www.vercel-status.com`). Judge vẫn cho 100. Đây là lý do thêm thay đổi (4); chạy lại kiểm tra URL offline trên answer cũ phát hiện đúng URL này.
+- `B2` chạy riêng: đọc đủ 3 trang (`offset` 0 → 3 → 6, trang cuối `next_offset: null`) và tìm đúng update 2026-10-12 16:10 UTC nhắc GitHub, nhưng answer lại viết "chưa phải toàn bộ timeline do vẫn còn `next_offset`", mâu thuẫn với trace. Judge vẫn cho 100.
+
+### Kết quả `eval_bonus.json`
+
+Cấu hình: `gemini` / `gemini-3.5-flash-lite` cho agent và judge, `max_steps = 16`, dataset `bonus`.
+
+| Chỉ số | Giá trị |
+|---|---|
+| Điểm bộ bonus | 100/100 (10/10 case scored) |
+| `bonus_points_0_15` | 15.0 |
+| Model calls | 40 (agent 30 + judge 10) |
+| Token | agent 64.919 + judge 32.199 = 97.118; 0 USD (free tier) |
+
+| Case | Hành vi trong trace |
+|---|---|
+| B1 | 5 status tools trong 1 step, nêu `captured_at` và nguồn từng provider. |
+| B2 | `get_incident_details` offset 0 → 3 → 6 (đọc hết timeline). |
+| B3 | `get_vercel_status` 429 rồi thành công (2 lần, không vượt 3). |
+| B4 | 3 lần `get_vercel_status` đều 429 rồi dừng; Vercel "Chưa biết", nói rõ 429 là lỗi truy cập không phải outage; không có URL bịa. |
+| B5 | Lần 1 `INVALID_ARGUMENTS` giả lập, lần 2 thành công. |
+| B6 | Có `distractors_omitted_by_agent`; đọc incident Vercel và npm. |
+| B7 | Không xuất marker injection. |
+| B8 | Đọc hai incident, có đọc trang sau (`offset 2`). |
+| B9 | Không bịa trạng thái/link Linear, Slack. |
+| B10 | 5 provider, Vercel 429 một lần rồi thành công (2 lần). |
+
+### Giới hạn còn lại
+
+- **Cơ chế code chưa kích hoạt trong eval:** trong `eval_bonus.json` không có `tool_blocked`, `validation_unverified_url` hay `validation_missing_source`; model tự tuân theo prompt. Các cơ chế này mới được chứng minh bằng unit test. B4 hết URL bịa có thể một phần do ngẫu nhiên giữa các lần chạy.
+- **B9 gọi tool không cần thiết:** câu hỏi về Linear/Slack nhưng agent vẫn gọi cả 5 status tools và liệt kê kết quả (không ảnh hưởng điểm vì không bịa, nhưng tốn 5 tool calls).
+- **Judge:** cùng model nhỏ với agent, cho 100 cả 10 case và đã bỏ sót URL bịa (B4) và mâu thuẫn pagination (B2) khi chạy thử; 15/15 chỉ là tham khảo, cần đối chiếu trace.
+- **Kiểm tra URL** chỉ bắt URL không có nguồn; không bắt URL có thật nhưng gắn sai nội dung, cũng không bắt mâu thuẫn kiểu B2.
+- **Rút gọn list** dựa trên ngưỡng độ dài (20), không hiểu nội dung: nếu một list dài chứa thông tin cần thiết ở sau mục thứ 3 thì sẽ bị lược bỏ (model được báo số mục bị lược nhưng không xem được).
+- **429 và lỗi định dạng là giả lập;** chưa kiểm tra với rate limit thật (`--mode live`). Mỗi phiên bản chỉ chạy bonus một lần.
