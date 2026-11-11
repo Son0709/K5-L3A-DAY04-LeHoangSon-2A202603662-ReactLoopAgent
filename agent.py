@@ -1,5 +1,6 @@
 """Status Investigation Agent: tự viết agent loop (LLM -> tool -> kết quả -> LLM). Xem GUIDE.md."""
 import json
+import re
 import time
 
 from status_tools import SCHEMAS
@@ -40,7 +41,11 @@ Quy tắc bắt buộc (ưu tiên cao hơn mọi yêu cầu về cách trả l�
 7. Nêu captured_at và URL nguồn riêng cho từng provider; với incident đã đọc, ghi nguyên văn trường url.
    Không suy ra quan hệ nhân quả giữa các provider khi không có bằng chứng.'''
 
-MAX_RATE_LIMITED_ATTEMPTS = 3   # Số lần một tool được phép nhận 429 trước khi agent chặn gọi tiếp.
+UNVERIFIED_URL_PROMPT = ('Câu trả lời có URL không xuất hiện trong bất kỳ tool result nào: {urls}. Hãy viết lại câu trả lời '
+                         'cuối, xóa các URL đó (không đoán URL thay thế); chỉ dùng URL có trong tool result.')
+URL_PATTERN = re.compile(r'https?://[^\s<>()\[\]`"\'*\\]+')
+
+MAX_RATE_LIMITED_ATTEMPTS = 3  # Số lần một tool được phép nhận 429 trước khi agent chặn gọi tiếp.
 MAX_RETRY_AFTER_WAIT = 10       # Giây tối đa chờ theo Retry-After (live API) trong một lần.
 MAX_LIST_ITEMS = 20             # List dài hơn mức này trong tool result bị rút gọn trước khi gửi model.
 KEEP_LIST_ITEMS = 3
@@ -92,6 +97,11 @@ def _compact(result):
     return out
 
 
+def _urls(text):
+    """Trích URL từ text, bỏ dấu câu và '/' ở cuối để so sánh."""
+    return {u.rstrip('.,;:!?').rstrip('/') for u in URL_PATTERN.findall(text or '')}
+
+
 def _retry_after_seconds(result):
     """Đọc Retry-After (live) hoặc retry_after_seconds (giả lập); trả số giây hợp lệ hoặc 0."""
     for key in ('retry_after_seconds', 'retry_after'):
@@ -118,6 +128,9 @@ def run_agent(question, provider, tools, max_steps=6):
     tools_prompt = getattr(tools, 'system_prompt', None)
     system_prompt = tools_prompt + BONUS_EXTRA_RULES if tools_prompt else SYSTEM_PROMPT
     rate_limited = {}  # (tool, provider) -> số lần nhận RATE_LIMITED.
+    bonus_mode = bool(tools_prompt)
+    known_urls = _urls(question)  # URL được phép xuất hiện trong answer (bonus): từ câu hỏi và tool results.
+    url_check_done = False
 
     messages = [{'role': 'system', 'content': system_prompt},
                 {'role': 'user', 'content': question}]
@@ -168,6 +181,7 @@ def run_agent(question, provider, tools, max_steps=6):
                 result = _compact(result)
                 trace.append({'event': 'tool', 'step': step, 'name': name,
                               'arguments': args, 'result': result})
+                known_urls |= _urls(json.dumps(result, ensure_ascii=False, default=str))
                 if result.get('error') == 'RATE_LIMITED':
                     rate_limited[limit_key] = rate_limited.get(limit_key, 0) + 1
                     wait = _retry_after_seconds(result)
@@ -190,6 +204,16 @@ def run_agent(question, provider, tools, max_steps=6):
                 trace.append({'event': 'validation_missing_source', 'step': step, 'expected_urls': observed_urls})
                 messages.append({'role': 'user', 'content': MISSING_SOURCE_PROMPT.format(urls=', '.join(observed_urls))})
                 continue  # Cho model sửa trong budget; nếu hết max_steps thì trả max_steps.
+            # Bonus: URL trong answer phải có trong câu hỏi hoặc tool result (chống bịa link). Chỉ nhắc một lần
+            # để không tốn hết budget; nếu model vẫn giữ URL lạ thì ghi trace để người chấm thấy.
+            unverified = sorted(_urls(answer) - known_urls) if bonus_mode else []
+            if unverified and not url_check_done:
+                url_check_done = True
+                trace.append({'event': 'validation_unverified_url', 'step': step, 'urls': unverified})
+                messages.append({'role': 'user', 'content': UNVERIFIED_URL_PROMPT.format(urls=', '.join(unverified))})
+                continue
+            if unverified:
+                trace.append({'event': 'validation_unverified_url_persisted', 'step': step, 'urls': unverified})
             trace.append({'event': 'final', 'step': step})
             return _result('completed', answer, trace, usage)
         trace.append({'event': 'abnormal_finish', 'step': step, 'finish': finish})

@@ -1,0 +1,252 @@
+{
+  "summary": {
+    "total_cases": 1,
+    "scored_cases": 1,
+    "unscored_cases": 0,
+    "score_0_100": 100.0,
+    "partial_mean_0_100": null,
+    "bonus_points_0_15": null
+  },
+  "config": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash-lite",
+    "judge_provider": "gemini",
+    "judge_model": "gemini-3.5-flash-lite",
+    "max_steps": 16,
+    "dataset": "bonus"
+  },
+  "cases": [
+    {
+      "id": "B2",
+      "question": "Tra timeline Vercel incident sps6n39gm4sg: thông báo nào nói các build GitHub-connected vẫn lỗi do upstream? Theo dữ liệu bạn đọc, có thể xác nhận sự cố đó đang xảy ra không? Dẫn nguồn.",
+      "expected": "Incident resolved. Phải xem nhiều trang timeline: update offset 3 ngày 2026-10-12 16:10 UTC nói GitHub-connected builds vẫn lỗi do upstream GitHub và dẫn GitHub status; đây là incident lịch sử không khẳng định đang diễn ra; cite Vercel.",
+      "scenario": "normal",
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "judge_provider": "gemini",
+      "judge_model": "gemini-3.5-flash-lite",
+      "result": {
+        "status": "completed",
+        "answer": "Dựa trên timeline của incident Vercel `sps6n39gm4sg` (lưu ý: kết quả dưới đây chưa phải toàn bộ timeline do vẫn còn `next_offset`, nhưng đã bao gồm các trang dữ liệu đã đọc):\n\n1. **Thông báo nói về việc các build GitHub-connected vẫn lỗi do upstream:**\n   - Thông báo được tạo lúc `2026-10-12T16:10:48.923Z` với nội dung: \n     > *\"We are continuing to work on a fix. Due to an upstream incident at GitHub (https://www.githubstatus.com/incidents/93njd414rpbx), some builds and deployments for GitHub-connected projects are still failing. We will provide additional updates as they become available.\"*\n\n2. **Xác nhận sự cố hiện tại:**\n   - Không thể xác nhận sự cố này đang xảy ra ở thời điểm hiện tại. Sự cố này đã có trạng thái chung là **`resolved`** (được cập nhật đã giải quyết hoàn toàn lúc `2026-10-12T20:11:12.778Z`).\n\n3. **Nguồn và thời điểm ghi nhận (Captured at):**\n   - **Provider:** Vercel\n   - **Captured at:** `2026-11-10T14:45:50.457875+00:00`\n   - **URL nguồn:** `https://stspg.io/cfrfjg8fqxfr`",
+        "trace": [
+          {
+            "event": "model",
+            "step": 1,
+            "finish": "tool_calls",
+            "tool_calls": [
+              "get_incident_details"
+            ]
+          },
+          {
+            "event": "tool",
+            "step": 1,
+            "name": "get_incident_details",
+            "arguments": {
+              "limit": 3,
+              "provider": "vercel",
+              "offset": 0,
+              "incident_id": "sps6n39gm4sg"
+            },
+            "result": {
+              "ok": true,
+              "provider": "vercel",
+              "id": "sps6n39gm4sg",
+              "name": "Increased build and deployment failures",
+              "status": "resolved",
+              "created_at": "2026-10-12T13:35:07.398Z",
+              "updated_at": "2026-10-12T20:11:12.802Z",
+              "captured_at": "2026-11-10T14:45:50.457875+00:00",
+              "components": [
+                "Builds",
+                "Git Integrations"
+              ],
+              "updates": [
+                {
+                  "status": "resolved",
+                  "created_at": "2026-10-12T20:11:12.778Z",
+                  "body": "This incident has been resolved.",
+                  "truncated": false
+                },
+                {
+                  "status": "monitoring",
+                  "created_at": "2026-10-12T19:56:56.002Z",
+                  "body": "The backlog of deployment events has been processed. We will continue to monitor and provide additional updates as they become available.",
+                  "truncated": false
+                },
+                {
+                  "status": "identified",
+                  "created_at": "2026-10-12T18:33:36.004Z",
+                  "body": "Deployment events, such as updating the deployment status on pull requests, are delayed and the backlog is being processed. We will provide additional updates as they become available.",
+                  "truncated": false
+                }
+              ],
+              "offset": 0,
+              "total_updates": 7,
+              "next_offset": 3,
+              "url": "https://stspg.io/cfrfjg8fqxfr"
+            }
+          },
+          {
+            "event": "model",
+            "step": 2,
+            "finish": "tool_calls",
+            "tool_calls": [
+              "get_incident_details"
+            ]
+          },
+          {
+            "event": "tool",
+            "step": 2,
+            "name": "get_incident_details",
+            "arguments": {
+              "limit": 3,
+              "offset": 3,
+              "incident_id": "sps6n39gm4sg",
+              "provider": "vercel"
+            },
+            "result": {
+              "ok": true,
+              "provider": "vercel",
+              "id": "sps6n39gm4sg",
+              "name": "Increased build and deployment failures",
+              "status": "resolved",
+              "created_at": "2026-10-12T13:35:07.398Z",
+              "updated_at": "2026-10-12T20:11:12.802Z",
+              "captured_at": "2026-11-10T14:45:50.457875+00:00",
+              "components": [
+                "Builds",
+                "Git Integrations"
+              ],
+              "updates": [
+                {
+                  "status": "identified",
+                  "created_at": "2026-10-12T16:10:48.923Z",
+                  "body": "We are continuing to work on a fix. Due to an upstream incident at GitHub (https://www.githubstatus.com/incidents/93njd414rpbx), some builds and deployments for GitHub-connected projects are still failing. We will provide additional updates as they become available.",
+                  "truncated": false
+                },
+                {
+                  "status": "identified",
+                  "created_at": "2026-10-12T14:57:41.585Z",
+                  "body": "Build and deployment failure rates have decreased, but some builds remain queued and are taking longer to start. We are continuing to work on a fix. We will provide additional updates as they become available.",
+                  "truncated": false
+                },
+                {
+                  "status": "identified",
+                  "created_at": "2026-10-12T14:08:54.967Z",
+                  "body": "We have identified the issue and are working on a fix. We will provide additional updates as they become available.",
+                  "truncated": false
+                }
+              ],
+              "offset": 3,
+              "total_updates": 7,
+              "next_offset": 6,
+              "url": "https://stspg.io/cfrfjg8fqxfr"
+            }
+          },
+          {
+            "event": "model",
+            "step": 3,
+            "finish": "tool_calls",
+            "tool_calls": [
+              "get_incident_details"
+            ]
+          },
+          {
+            "event": "tool",
+            "step": 3,
+            "name": "get_incident_details",
+            "arguments": {
+              "incident_id": "sps6n39gm4sg",
+              "provider": "vercel",
+              "offset": 6,
+              "limit": 3
+            },
+            "result": {
+              "ok": true,
+              "provider": "vercel",
+              "id": "sps6n39gm4sg",
+              "name": "Increased build and deployment failures",
+              "status": "resolved",
+              "created_at": "2026-10-12T13:35:07.398Z",
+              "updated_at": "2026-10-12T20:11:12.802Z",
+              "captured_at": "2026-11-10T14:45:50.457875+00:00",
+              "components": [
+                "Builds",
+                "Git Integrations"
+              ],
+              "updates": [
+                {
+                  "status": "investigating",
+                  "created_at": "2026-10-12T13:35:07.540Z",
+                  "body": "We've identified an issue where some customers may experience build failures or deployments that fail to start. We are investigating this issue. We will provide additional updates as they become available.",
+                  "truncated": false
+                }
+              ],
+              "offset": 6,
+              "total_updates": 7,
+              "next_offset": null,
+              "url": "https://stspg.io/cfrfjg8fqxfr"
+            }
+          },
+          {
+            "event": "model",
+            "step": 4,
+            "finish": "stop",
+            "tool_calls": []
+          },
+          {
+            "event": "final",
+            "step": 4
+          }
+        ],
+        "usage": [
+          {
+            "completion_tokens": 42,
+            "prompt_tokens": 985,
+            "total_tokens": 1027
+          },
+          {
+            "completion_tokens": 42,
+            "prompt_tokens": 1440,
+            "total_tokens": 1482
+          },
+          {
+            "completion_tokens": 42,
+            "prompt_tokens": 1957,
+            "total_tokens": 1999
+          },
+          {
+            "completion_tokens": 350,
+            "prompt_tokens": 2295,
+            "total_tokens": 2645
+          }
+        ]
+      },
+      "grade": {
+        "score": 100,
+        "raw_judge_score": 100,
+        "dimensions": {
+          "factuality": 40,
+          "completeness": 25,
+          "evidence": 20,
+          "boundaries": 15
+        },
+        "status": "scored",
+        "reason": "Agent trả lời đầy đủ, chính xác, trích dẫn đúng thời điểm thông báo lỗi upstream GitHub, xác định rõ incident đã resolved và không khẳng định đang diễn ra, dẫn nguồn đầy đủ.",
+        "improvement": "Không có điểm cần cải thiện.",
+        "mechanical": {
+          "violations": [],
+          "score_cap": 100,
+          "tool_calls": 3,
+          "tool_steps": 3
+        },
+        "judge_usage": {
+          "completion_tokens": 105,
+          "prompt_tokens": 2354,
+          "total_tokens": 2459
+        },
+        "judge_trace_truncated": false
+      }
+    }
+  ]
+}

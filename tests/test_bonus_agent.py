@@ -54,6 +54,33 @@ class BonusAgentExtrasTests(unittest.TestCase):
         self.assertEqual(sent['distractors_omitted_by_agent'], 157)
         self.assertEqual(sent['provider'], 'vercel')
 
+    def test_fabricated_url_gets_one_revision(self):
+        fake = FakeProvider([tool_call('a', 'get_vercel_status', '{}'),
+                             final('Vercel: xem https://www.vercelstatus.com (giả định).'),
+                             final('Vercel: xem https://www.vercel-status.com.')])
+        result = run_agent('x', fake, BonusTools(), max_steps=5)
+        self.assertEqual(result['status'], 'completed')
+        events = [t for t in result['trace'] if t['event'] == 'validation_unverified_url']
+        self.assertEqual(events[0]['urls'], ['https://www.vercelstatus.com'])
+        self.assertNotIn('vercelstatus.com', result['answer'])
+
+    def test_known_urls_pass_and_check_runs_once(self):
+        # URL có trong tool result: không bị nhắc.
+        fake = FakeProvider([tool_call('a', 'get_npm_status', '{}'), final('Nguồn: https://status.npmjs.org/')])
+        result = run_agent('x', fake, BonusTools())
+        self.assertFalse(any(t['event'].startswith('validation_unverified') for t in result['trace']))
+        # Model giữ URL lạ sau khi bị nhắc: không lặp vô hạn, ghi trace persisted.
+        fake = FakeProvider([final('https://fake.example/x'), final('https://fake.example/x')])
+        result = run_agent('x', fake, BonusTools(), max_steps=5)
+        self.assertEqual(result['status'], 'completed')
+        self.assertTrue(any(t['event'] == 'validation_unverified_url_persisted' for t in result['trace']))
+
+    def test_url_check_not_applied_to_main_tools(self):
+        fake = FakeProvider([final('Xem https://fake.example/x')])
+        result = run_agent('x', fake, StatusTools())
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(len(fake.histories), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
