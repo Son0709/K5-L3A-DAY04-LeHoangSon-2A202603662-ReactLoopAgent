@@ -75,16 +75,49 @@ Nguyên nhân có thể:
 
 ## 4. So sánh hai lần chạy
 
+Cấu hình hai lần chạy giống hệt nhau (khối `config`): agent và judge `gemini` / `gemini-3.5-flash-lite`, `max_steps = 8`, dataset `core`, snapshot cố định, 22/22 case được chấm.
+
 | Chỉ số | `eval_before.json` | `eval_after.json` |
 |---|---|---|
-| Điểm tổng |  |  |
-| Điểm case đã chọn |  |  |
-| Số model calls |  |  |
-| Token, chi phí nếu có |  |  |
+| Điểm tổng | 95.68 | 95.91 |
+| Điểm case đã chọn (H7) | 55 | 100 |
+| Số model calls | 75 (agent 53 + judge 22) | 76 (agent 54 + judge 22) |
+| Token, chi phí nếu có | 98.185 (agent 54.264 + judge 43.921); 0 USD (free tier) | 103.435 (agent 62.334 + judge 41.101); 0 USD (free tier) |
+| Case đọc incident nhưng không dẫn URL | 6 (E2, E3, E4, A6, A7, H6) | 0 |
+| Event `validation_missing_source` | 0 (chưa có kiểm tra nguồn) | 0 |
+
+Điểm từng case thay đổi:
+
+| Case | Trước | Sau | Ghi chú |
+|---|---:|---:|---|
+| H7 | 55 | 100 | Không còn kết luận Cloudflare operational khi timeout. |
+| H2 | 50 | 100 | Gọi `get_status` rồi `get_incident_details`, hết cap 50. |
+| H1 | 100 | 60 | Không theo liên kết sang `xr3myzj7ms51`; cap 60 (judge thô 100). |
+| H6 | 100 | 60 | Không theo liên kết, khẳng định sai về nguyên nhân; cap 60 (judge thô 95). |
+| H4 | 100 | 90 | Từ chối viết thơ đúng phạm vi nhưng câu chữ gây hiểu nhầm. |
+| 17 case còn lại | 100 | 100 | |
+
+Token agent tăng khoảng 15% do system prompt dài hơn; số model calls gần như không đổi.
 
 - Lỗi đã giải quyết:
+  - **H7:** trace sau vẫn có `tool_error: TimeoutError` cho Cloudflare, nhưng answer nói trạng thái Cloudflare Spectrum "CHƯA BIẾT", không kết luận operational; boundaries 0 → 15.
+  - **H2:** trace sau có `get_status` (step 1) trước `get_incident_details` (step 2); agent bác tiền đề sai và dẫn `https://stspg.io/lv4q3xm9r0rk`.
+  - **Thiếu URL incident:** từ 6 case xuống 0 case. Nhờ quy tắc (4) trong prompt, model dẫn URL ngay lần đầu nên kiểm tra nguồn trong code chưa phải kích hoạt lần nào.
 - Lỗi còn lại hoặc mới xuất hiện:
+  - **H1 và H6 (mới, nghiêm trọng nhất):** ở lần 1, agent đọc `h02n9572mx9y`, thấy update "Please refer to the combined summary … /incidents/xr3myzj7ms51" và gọi tiếp `get_incident_details(xr3myzj7ms51)` ở step sau. Ở lần 2, agent gọi mọi tool song song trong step 1 (H1: `h02n9572mx9y` + `yaa0witbl2me`; H6: `get_status` + `h02n9572mx9y`) rồi trả lời ngay ở step 2, **không đọc `xr3myzj7ms51`**. Mechanical check: "Cần tool calls ở ít nhất 2 model steps khác nhau" nên cap 60.
+    - H6 còn **khẳng định sai**: "Incident gộp chỉ mô tả ảnh hưởng … không cung cấp thông tin chi tiết về nguyên nhân gốc rễ", trong khi `xr3myzj7ms51` có nêu nguyên nhân ("a configuration change to an internal event-routing service…"). Agent kết luận về nội dung một incident chưa đọc.
+    - Nguyên nhân có thể: prompt không có quy tắc "update dẫn tới incident khác thì đọc incident đó trước khi kết luận"; ngoài ra model không ổn định giữa các lần chạy (lần 1 tự đi tuần tự, lần 2 gọi song song), nên với một lần chạy chưa thể khẳng định prompt mới gây ra lỗi này.
+    - Đề xuất (chưa implement, để `agent.py` khớp với `eval_after.json`): thêm quy tắc prompt về theo liên kết; hoặc kiểm tra bằng code tương tự kiểm tra nguồn: lấy các incident ID xuất hiện trong `updates[].body` của incident đã đọc, nếu chưa đọc ID đó thì ghi event và yêu cầu model gọi tiếp trước khi trả lời. Cần chạy lại nhiều lần để đánh giá.
+  - **H4:** câu từ chối "không thể làm theo yêu cầu viết thơ về biển hoặc bỏ qua việc kiểm tra trạng thái khi được yêu cầu" gây hiểu nhầm (completeness 15/25). Có thể do quy tắc mới dài và mang tính "bắt buộc" khiến model trả lời cứng nhắc với yêu cầu ngoài phạm vi.
+  - **Văn phong:** answer H7 (khi chạy riêng) viết "Theo quy tắc bắt buộc…", tức lặp lại câu chữ của system prompt cho người dùng.
 
 ## 5. Giới hạn
 
-Nêu giới hạn của điểm judge, của snapshot và của việc chỉ chạy một lần mỗi phiên bản.
+- **Điểm judge:**
+  - Judge là cùng model với agent (`gemini-3.5-flash-lite`, model nhỏ) nên có thể thiên lệch khi tự chấm và chấm dễ: 17/22 case đạt 100 ở cả hai lần.
+  - Judge bỏ sót lỗi rõ ràng: ở `eval_before.json`, 6 case không dẫn URL incident vẫn được 100; ở `eval_after.json`, H6 khẳng định sai về nguyên nhân vẫn được judge thô 95 và H1 không đọc incident được trỏ tới vẫn được 100. Điểm H1/H6 chỉ giảm nhờ mechanical check.
+  - Vì vậy chênh lệch điểm tổng 95.68 → 95.91 (+0.23) không đủ để kết luận agent tốt hơn; phải đọc trace từng case. Kết luận "H7/H2 đã sửa" dựa trên trace (không còn khẳng định operational, có `get_status`), không chỉ dựa trên điểm.
+- **Snapshot:** dữ liệu chụp ngày 09/11/2026, chỉ 50 incident gần nhất, `get_incident_details` chỉ giữ 3 update và cắt body ở 900 ký tự. Kết quả không phản ánh trạng thái thực tế hiện tại và không kiểm tra hành vi khi chạy `live` (rate limit, dữ liệu thay đổi). Các scenario timeout/injection là giả lập.
+- **Một lần chạy mỗi phiên bản:** model không deterministic. H1/H6 cho thấy cùng câu hỏi có thể đi đường khác nhau giữa hai lần chạy, nên cả cải thiện (H7, H2) lẫn suy giảm (H1, H6, H4) đều có thể một phần do ngẫu nhiên. Cần chạy lặp lại nhiều lần (ví dụ 3–5 lần mỗi phiên bản) để đo độ ổn định.
+- **Kiểm tra nguồn:** chỉ kiểm tra answer có chứa ít nhất một URL incident đã quan sát; không chứng minh mọi claim có nguồn, không bắt được việc dẫn URL đúng nhưng nội dung sai (như H6). Trong eval thật chưa lần nào kích hoạt, nên mới được kiểm chứng bằng unit test. Mỗi lần sửa tốn thêm một model call và có thể dẫn tới `max_steps` (0 điểm) nếu model liên tục không dẫn nguồn.
+- **Prompt:** quy tắc trong prompt chỉ giảm khả năng bịa, không đảm bảo; model vẫn có thể làm theo yêu cầu sai ở câu hỏi khác.
