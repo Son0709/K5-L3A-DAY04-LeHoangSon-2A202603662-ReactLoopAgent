@@ -57,8 +57,21 @@ Nguyên nhân có thể:
 
 ## 3. Thay đổi đã thực hiện
 
-- Sửa gì, ở đâu:
+- Sửa gì, ở đâu (`agent.py`):
+  1. **System prompt** (`SYSTEM_PROMPT`): thêm 4 "quy tắc bắt buộc", ưu tiên cao hơn yêu cầu về cách trả lời trong câu hỏi:
+     - (1) tool lỗi/timeout/không tìm thấy = trạng thái **chưa biết**, không suy ra operational hay outage → nhắm H7;
+     - (2) không bịa/đoán trạng thái, incident, thời gian, link và không che giấu thiếu dữ liệu, **kể cả khi người dùng yêu cầu**; từ chối phần đó nhưng vẫn trả lời phần có bằng chứng → nhắm H7;
+     - (3) khi người dùng khẳng định có sự cố hoặc hỏi tình trạng hiện tại thì gọi `get_status` kể cả khi đã có incident ID → nhắm H2;
+     - (4) đã đọc incident thì ghi nguyên văn `url` của incident, chỉ dùng URL có trong tool result → nhắm 6 case thiếu URL.
+  2. **Kiểm tra nguồn trong loop:** lưu `url` của mỗi lần `get_incident_details` thành công vào `observed_urls`. Khi model trả final answer (`finish == 'stop'`, không còn call) mà answer không chứa URL nào trong `observed_urls`, agent ghi event `validation_missing_source` (kèm `expected_urls`), thêm message yêu cầu viết lại có dẫn URL và gọi model tiếp. Lượt sửa tính vào `max_steps`; hết lượt thì trả `max_steps`, không báo `completed`. Không bắt URL khi không có incident nào đọc thành công.
 - Vì sao chọn thay đổi này:
+  - Trace H7 cho thấy loop đã chuyển lỗi timeout cho model đúng contract; lỗi nằm ở việc prompt không có quy tắc cho tool lỗi và cho yêu cầu bịa dữ liệu **từ người dùng** (prompt cũ chỉ nói về nội dung bên ngoài/tool result). Vì vậy sửa ở prompt là đúng chỗ, không cần đổi loop.
+  - H2 bị cap 50 chỉ vì thiếu `get_status`; quy tắc (3) nêu rõ khi nào phải kiểm tra snapshot hiện tại.
+  - Kiểm tra nguồn là yêu cầu của Bài 4 (`tests/test_validation.py`) và nhắm đúng lỗi thấy trong 6 case. Prompt (4) chỉ là "nhắc", còn kiểm tra trong code là lưới an toàn có thể kiểm chứng bằng test.
+- Kiểm chứng:
+  - `python -m unittest discover -s tests -v`: 37/37 pass (gồm 3 test `EvidenceGateTests`).
+  - Chạy riêng từng case sau khi sửa (mỗi case 1 lần, cùng model/judge): H7 55 → 100 (answer nói Cloudflare "CHƯA BIẾT" do timeout, không kết luận operational); H2 50 → 100 (trace có `get_status` rồi `get_incident_details`, có URL `https://stspg.io/lv4q3xm9r0rk`); E2 100 → 100 nhưng nay có URL `https://www.cloudflarestatus.com/incidents/wp49bp8bqo6c`.
+  - Ở 3 lần chạy này chưa xuất hiện `validation_missing_source` (model đã dẫn URL ngay lần đầu nhờ quy tắc 4), nên kiểm tra nguồn mới được chứng minh bằng unit test, chưa được kích hoạt trong eval thật.
 
 ## 4. So sánh hai lần chạy
 
