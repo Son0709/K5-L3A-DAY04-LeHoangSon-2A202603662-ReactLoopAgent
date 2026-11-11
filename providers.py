@@ -1,6 +1,8 @@
 """Bốn provider cùng một interface. Không chứa agent loop."""
 import json
 import os
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -12,16 +14,47 @@ CONFIG = {
 }
 
 
+# Giãn cách request để không vượt giới hạn requests/phút của free tier.
+# PROVIDER_MIN_INTERVAL (giây) mặc định 0 = không giãn cách. Lock giúp đúng cả khi --workers > 1.
+_RATE_LOCK = threading.Lock()
+_LAST_REQUEST = [0.0]
+RETRY_STATUS = {429, 500, 503}
+MAX_RETRIES = 3
+
+
+def _wait_turn():
+    interval = float(os.getenv('PROVIDER_MIN_INTERVAL', '0') or 0)
+    if interval <= 0:
+        return
+    with _RATE_LOCK:
+        delay = _LAST_REQUEST[0] + interval - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        _LAST_REQUEST[0] = time.monotonic()
+
+
 def post_json(url, headers, payload):
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', **headers})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as exc:
-        # Do not print response bodies: they may contain account or request data.
-        raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
+    data = json.dumps(payload).encode()
+    for attempt in range(MAX_RETRIES + 1):
+        _wait_turn()
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json', **headers})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code in RETRY_STATUS and attempt < MAX_RETRIES:
+                # Ưu tiên Retry-After của server; nếu không có thì chờ tăng dần 15s, 30s, 45s.
+                try:
+                    wait = float(exc.headers.get('Retry-After'))
+                except (TypeError, ValueError, AttributeError):
+                    wait = 15 * (attempt + 1)
+                exc.close()
+                time.sleep(min(wait, 60))
+                continue
+            # Do not print response bodies: they may contain account or request data.
+            raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
 
 
 class Provider:
